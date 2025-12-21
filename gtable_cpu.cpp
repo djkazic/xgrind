@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+#include <errno.h>
 #include <sys/resource.h>
 
 #include "GPU/GPUSecp.h"      // for SIZE_CPU_STACK, NUM_GTABLE_CHUNK, etc
@@ -23,9 +25,13 @@ static void increaseStackSizeCPU() {
             rl.rlim_cur = cpuStackSize;
             result = setrlimit(RLIMIT_STACK, &rl);
             if (result != 0) {
-                fprintf(stderr, "setrlimit returned result = %d\n", result);
+                fprintf(stderr, "setrlimit failed: %s\n", strerror(errno));
+                exit(1);
             }
         }
+    } else {
+        fprintf(stderr, "getrlimit failed: %s\n", strerror(errno));
+        exit(1);
     }
 }
 

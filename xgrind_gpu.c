@@ -9,6 +9,20 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <sys/stat.h>
+#include <libgen.h>
+
+#define MAX_FILE_SIZE (1ULL << 30)
+
+static int validate_filename(const char *filename) {
+    if (!filename || !*filename) return 0;
+    if (filename[0] == '/') return 0;
+    if (strcmp(filename, "..") == 0) return 0;
+    if (strncmp(filename, "../", 3) == 0) return 0;
+    if (strstr(filename, "/../")) return 0;
+    size_t len = strlen(filename);
+    if (len >= 3 && strcmp(filename + len - 3, "/..") == 0) return 0;
+    return 1;
+}
 
 #ifdef __cplusplus
 extern "C" {
@@ -206,6 +220,10 @@ static int grind_for_32bit_value_gpu(uint32_t v,
 }
 
 static int encode_file(const char *filename) {
+    if (!validate_filename(filename)) {
+        fprintf(stderr, "Invalid filename\n");
+        return 1;
+    }
     FILE *f = fopen(filename, "rb");
     if (!f) {
         perror("fopen input");
@@ -218,6 +236,11 @@ static int encode_file(const char *filename) {
         return 1;
     }
     size_t len = (size_t)st.st_size;
+    if (len > MAX_FILE_SIZE) {
+        fprintf(stderr, "File too large (max %llu bytes)\n", (unsigned long long)MAX_FILE_SIZE);
+        fclose(f);
+        return 1;
+    }
     unsigned char *data = NULL;
     if (len > 0) {
         data = (unsigned char *)malloc(len);
@@ -261,6 +284,13 @@ static int encode_file(const char *filename) {
         return 1;
     }
 
+    if (len > SIZE_MAX / 8) {
+        fprintf(stderr, "File size would overflow\n");
+        fclose(fpub);
+        fclose(fpriv);
+        free(data);
+        return 1;
+    }
     size_t total_bits = len * 8;
     size_t num_chunks = (total_bits + 31) / 32;
 
@@ -327,6 +357,10 @@ static inline uint32_t extract_32bit_from_serialized(const unsigned char *pub_se
 }
 
 static int decode_file(const char *base) {
+    if (!validate_filename(base)) {
+        fprintf(stderr, "Invalid filename\n");
+        return 1;
+    }
     char meta_name[4096];
     snprintf(meta_name, sizeof(meta_name), "%s.meta", base);
     FILE *fmeta = fopen(meta_name, "r");
@@ -341,6 +375,10 @@ static int decode_file(const char *base) {
         return 1;
     }
     fclose(fmeta);
+    if (original_size > MAX_FILE_SIZE) {
+        fprintf(stderr, "Metadata specifies file too large\n");
+        return 1;
+    }
 
     char pub_name[4096];
     snprintf(pub_name, sizeof(pub_name), "%s.realpubkeys.txt", base);
@@ -400,8 +438,11 @@ static int decode_file(const char *base) {
     fclose(fpub);
 
     if (chunk_idx < num_chunks) {
-        fprintf(stderr, "Warning: expected %zu chunks, read %zu\n",
+        fprintf(stderr, "Incomplete data: expected %zu chunks, read %zu\n",
                 num_chunks, chunk_idx);
+        free(out);
+        fclose(fout);
+        return 1;
     }
 
     if (original_size > 0) {

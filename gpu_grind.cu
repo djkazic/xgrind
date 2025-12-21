@@ -166,8 +166,8 @@ __global__ void grind_batch_kernel(const uint8_t *priv_in,
         for (int i = 0; i < 33; ++i) {
             dst[i] = pub[i];
         }
-        // Tell other threads to stop as soon as they check g_stop_flag
         atomicExch(&g_stop_flag, 1);
+        __threadfence();
     }
 }
 
